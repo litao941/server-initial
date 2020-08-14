@@ -1,0 +1,75 @@
+#/etc/sysctl.d/99-sysctl.conf 
+
+net.ipv4.tcp_tw_recycle=1
+net.ipv4.tcp_tw_reuse=1
+net.ipv4.tcp_timestamps=1
+net.ipv4.tcp_fin_timeout=15
+net.ipv4.tcp_max_syn_backlog = 16384 
+net.ipv4.tcp_mem = 786432 2097152 3145728
+net.ipv4.tcp_rmem = 4096 4096 16777216
+net.ipv4.tcp_wmem = 4096 4096 16777216
+net.ipv4.ip_local_port_range = 1024 65535
+net.core.somaxconn = 65535
+net.core.rmem_default = 262144 
+net.core.wmem_default = 262144
+net.core.rmem_max = 16777216
+net.core.wmem_max = 16777216
+net.core.netdev_max_backlog = 20000
+net.ipv4.tcp_max_orphans = 131072
+
+
+#/etc/security/limits.conf
+* soft nofile 65535 
+* hard nofile 65535
+
+
+#/root/allcn.sh
+#!/bin/bash
+
+mmode=$1
+#download ip list file
+#wget -q --timeout=60 -O- 'http://ftp.apnic.net/apnic/stats/apnic/delegated-apnic-latest' | awk -F\| '/CN\|ipv4/ { printf("%s/%d\n", $4, 32-log($5)/log(2)) }' > /root/china_ssr.txt
+
+CNIP="/root/china_ssr.txt"
+
+
+gen_iplist() {
+        cat <<-EOF
+                $(cat ${CNIP:=/dev/null} 2>/dev/null)
+EOF
+}
+
+flush_r() {
+iptables  -F ALLCNRULE 2>/dev/null
+iptables -D INPUT -p tcp -j ALLCNRULE 2>/dev/null
+iptables  -X ALLCNRULE 2>/dev/null
+ipset -X allcn 2>/dev/null
+}
+
+mstart() {
+ipset create allcn hash:net 2>/dev/null
+ipset -! -R <<-EOF
+$(gen_iplist | sed -e "s/^/add allcn /")
+EOF
+
+iptables -N ALLCNRULE
+iptables -I INPUT -p tcp -j ALLCNRULE
+iptables -A ALLCNRULE -s 127.0.0.0/8 -j RETURN
+iptables -A ALLCNRULE -s 169.254.0.0/16 -j RETURN
+iptables -A ALLCNRULE -s 224.0.0.0/4 -j RETURN
+iptables -A ALLCNRULE -s 255.255.255.255 -j RETURN
+iptables -A ALLCNRULE -s 183.60.178.45 -j RETURN
+iptables -A ALLCNRULE -m set --match-set allcn  src -j RETURN
+iptables -A ALLCNRULE -p tcp -j DROP
+
+
+}
+
+if [ "$mmode" == "stop" ] ;then
+flush_r
+exit 0
+fi
+
+flush_r
+sleep 1
+mstart
